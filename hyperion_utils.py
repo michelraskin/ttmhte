@@ -1,4 +1,5 @@
-  
+import sys
+dir1 = os.path.abspath(os.path.join(os.getcwd(), '../analysisFunctions'))  
 from analysis_functions import *
 
 def getDf(myDfs, merge):
