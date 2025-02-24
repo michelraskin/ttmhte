@@ -17,6 +17,12 @@ def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColum
     myPredictorsDf.LastGCS15 = 0
     myPredictorsDf.loc[myFilter, 'LastMGCSPositive'] = (myPredictorsDf.loc[myFilter, 'LastMGCS'].astype(float) == 6).astype(int)
 
+    myBinaryColumns = myPredictorsDf.columns[myPredictorsDf.nunique() == 2] 
+    myBinaryDf = myPredictorsDf[myBinaryColumns]
+    myBinaryDf = myBinaryDf.select_dtypes(exclude=["object"])
+    myLowColumns = myBinaryDf.columns[(myBinaryDf.sum() < 15)]
+    myPredictorsDf.drop(columns=myLowColumns, inplace=True)
+
     if (aPredictedColumn == 'LastMGCSPositive'):
         myPredictorsDf = myPredictorsDf[myFilter & ~myPredictorsDf[aTreatmentColumn].isna()]
     else:
