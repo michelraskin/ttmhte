@@ -32,7 +32,7 @@ def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColum
     myColumns = [x for x in myPredictorsDf.columns if 'emp' in x]
 
     # Get output data
-    myXValue = myPredictorsDf.drop(columns= myColumns + [ 'LastMGCSTime', 'FirstMGCSTime', 'LastMGCSPositive', 'LastMGCS' , 'apacheadmissiondx', 'hospitaladmittime24', 'FirstGCSTime', 'LastGCSTime', 'LastGCS', 'hospitaldischargestatus', 'LastGCS15', 'hospitaladmitsource', 'DeathAtDischarge', 'patientunitstayid'])
+    myXValue = myPredictorsDf.drop(columns= myColumns + ['Hypothermia', 'LastMGCSTime', 'FirstMGCSTime', 'LastMGCSPositive', 'LastMGCS' , 'apacheadmissiondx', 'hospitaladmittime24', 'FirstGCSTime', 'LastGCSTime', 'LastGCS', 'hospitaldischargestatus', 'LastGCS15', 'hospitaladmitsource', 'DeathAtDischarge', 'patientunitstayid'])
     myXValue = myXValue
     myXValue.FirstGCS = myXValue.FirstGCS.astype(float)
     myXValue.FirstMGCS = myXValue.FirstMGCS.astype(float)
