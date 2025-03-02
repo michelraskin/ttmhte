@@ -23,7 +23,7 @@ def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColum
     myLowColumns = myBinaryDf.columns[(myBinaryDf.sum() < 15)]
     myPredictorsDf.drop(columns=list(myLowColumns) + aDropColumns, inplace=True)
 
-    myGcs15Fitler = myPredictorsDf['FirstGCS'] != 15
+    myGcs15Fitler = (myPredictorsDf['FirstGCS'] != 15) & (myPredictorsDf.nurse_max_Motor != 6)
 
     if (aPredictedColumn == 'LastMGCSPositive'):
         myPredictorsDf = myPredictorsDf[myGcs15Fitler & myFilter & ~myPredictorsDf[aTreatmentColumn].isna()]
