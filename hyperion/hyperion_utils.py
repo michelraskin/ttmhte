@@ -1,6 +1,6 @@
 import sys
 import os
-dir1 = os.path.abspath(os.path.join(os.getcwd(), '../analysisFunctions'))    
+dir1 = os.path.abspath(os.path.join(os.getcwd(), '../../analysisFunctions'))    
 from analysis_functions import *
 
 def getDf(myDfs, merge):
@@ -50,7 +50,7 @@ def getType(myNewDf):
     return myNewDf
 
 def readDfs():
-    read_path = '../formatteddata\\'
+    read_path = './formatteddata/'
     myDfs = {}
     for file in os.listdir(read_path):
         myDfs[file.split('.')[0]] = pd.read_csv(read_path + file)
@@ -58,3 +58,32 @@ def readDfs():
 
 def getGroupByPatients(myDf, aColumn, aRename):
     return myDf.groupby(aColumn).agg({'SUBJID': 'count'}).reset_index().rename(columns={aColumn: aRename, 'SUBJID': 'Patients'}).set_index(aRename)
+
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+import numpy as np
+
+def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColumn = 'Hypothermia', aTestSize = 0.3, aTreatmentSplit = False, aDropColumns = [], aSkipTemp = True, aCv = False, aNumSplits = 3):
+    myPredictorsDf = pd.read_csv('predictorsDf.csv')
+    myColumns = []
+    if (aSkipTemp):
+        myColumns = [x for x in myPredictorsDf.columns if 'EMP' in x]
+    myFilter = myPredictorsDf['groupe'] != 2
+
+    # Get output data
+    myXValue = myPredictorsDf.drop(columns= myColumns + ['CPC_SC3', 'CPC12', 'J0_SEX', 'SUBJID', 'BARTHEL_SC', 'SOFA_SC7', 'DS_DC', 'DAYS_ALIVE_30', 'J0_GLASGOW_CONTROLE', 'J0_CORDA_DOS'])
+    myXValue = myXValue
+    myXValue = myXValue.select_dtypes(exclude=['object'])
+    myYValue = myPredictorsDf[aPredictedColumn]
+    myYValue = myYValue.astype(int)
+    if (aCv):
+        skf = StratifiedKFold(n_splits=aNumSplits, shuffle=True)
+        return myXValue, myYValue, skf
+    if (aTreatmentSplit):
+        myXValue = myXValue.drop(columns=[aTreatmentColumn])
+        X_train, X_test, T_train, T_test, y_train, y_test = train_test_split(myXValue, myPredictorsDf[aTreatmentColumn], myYValue, stratify=myPredictorsDf[[aPredictedColumn, aTreatmentColumn]], test_size=aTestSize)
+        return myPredictorsDf, X_train, X_test, T_train, T_test, y_train, y_test
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(myXValue, myYValue, stratify=myPredictorsDf[[aPredictedColumn, aTreatmentColumn]], test_size=aTestSize)
+        return myPredictorsDf, X_train, X_test, y_train, y_test
