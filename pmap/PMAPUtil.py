@@ -3,7 +3,7 @@ from sklearn.model_selection import train_test_split
 import numpy as np
 # death_at_disch hypothermia 
 def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColumn = 'hypothermia', aTestSize = 0.3, aTreatmentSplit = False, aDropColumns = [], aSkipTemp = True):
-    myPredictorsDf = pd.read_csv('PMAP_Predictors2.csv')
+    myPredictorsDf = pd.read_csv('PMAP_Predictors4.csv')
 
     top_corr = pd.read_csv('top_correlations.csv')
     columns_to_drop = top_corr[top_corr['hypothermia'].abs() > 0.7]['Unnamed: 0'].tolist()

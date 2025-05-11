@@ -3,7 +3,7 @@ from sklearn.model_selection import train_test_split
 import numpy as np
 # death_at_disch hypothermia 
 def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColumn = 'hypothermia', aTestSize = 0.3, aTreatmentSplit = False, aDropColumns = [], aSkipTemp = True):
-    myPredictorsDf = pd.read_csv('PMAP_Predictors2.csv')
+    myPredictorsDf = pd.read_csv('MIMIC_Predictors.csv')
 
     top_corr = pd.read_csv('top_correlations.csv')
     columns_to_drop = top_corr[top_corr['hypothermia'].abs() > 0.7]['Unnamed: 0'].tolist()
@@ -28,10 +28,10 @@ def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColum
 
     myColumns = []
     if (aSkipTemp):
-        myColumns = [x for x in myPredictorsDf.columns if 'emp' in x]
+        myColumns = [x for x in myPredictorsDf.columns if 'emp' in x or 'dx_' == x[0:3]]
 
     # Get output data
-    myXValue = myPredictorsDf.drop(columns=  myColumns + ['first_mGCS', 'last_mGCS_time', 'first_mGCS_time', 'LastMGCSPositive', 'last_mGCS', 'death_at_disch'])
+    myXValue = myPredictorsDf.drop(columns=columns_to_drop +  myColumns + ['first_mGCS', 'last_mGCS_time', 'first_mGCS_time', 'LastMGCSPositive', 'last_mGCS', 'death_at_disch', 'first_mGCS_time.1', 'first_mGCS.1', 'last_mGCS_time.1', 'last_mGCS.1'])
     myXValue = myXValue
     myXValue = myXValue.select_dtypes(exclude=['object'])
     myYValue = myPredictorsDf[aPredictedColumn]
