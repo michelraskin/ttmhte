@@ -31,7 +31,7 @@ def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColum
         myColumns = [x for x in myPredictorsDf.columns if 'emp' in x and 'dx_' == x[0:3]]
 
     # Get output data
-    myXValue = myPredictorsDf.drop(columns=  myColumns + ['first_mGCS', 'last_mGCS_time', 'first_mGCS_time', 'LastMGCSPositive', 'last_mGCS', 'death_at_disch'])
+    myXValue = myPredictorsDf.drop(columns=columns_to_drop+  myColumns + ['first_mGCS', 'last_mGCS_time', 'first_mGCS_time', 'LastMGCSPositive', 'last_mGCS', 'death_at_disch'])
     myXValue = myXValue
     myXValue = myXValue.select_dtypes(exclude=['object'])
     myYValue = myPredictorsDf[aPredictedColumn]

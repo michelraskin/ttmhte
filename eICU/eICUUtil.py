@@ -7,7 +7,7 @@ def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColum
 
     # Preprocessing
     myFilter = (myPredictorsDf['LastMGCS'] != 'Unable to score due to medication') & (~myPredictorsDf['LastMGCS'].isna())
-    myFilter = myFilter & (myPredictorsDf['FirstMGCSTime'] != myPredictorsDf['LastMGCSTime']) & (myPredictorsDf['FirstMGCSTime'] < 360)
+    myFilter = myFilter & (myPredictorsDf['FirstMGCSTime'] != myPredictorsDf['LastMGCSTime']) #& (myPredictorsDf['FirstMGCSTime'] < 360)
     myPredictorsDf.loc[myPredictorsDf['FirstGCS'] == 'Unable to score due to medication', 'FirstGCS'] = np.nan
     myPredictorsDf.loc[myPredictorsDf['FirstMGCS'] == 'Unable to score due to medication', 'FirstMGCS'] = np.nan
     myPredictorsDf.loc[myPredictorsDf['LastMGCS'] == 'Unable to score due to medication', 'LastMGCS'] = np.nan
@@ -23,22 +23,22 @@ def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColum
     myLowColumns = myBinaryDf.columns[(myBinaryDf.sum() < 15)]
     myPredictorsDf.drop(columns=list(myLowColumns) + aDropColumns, inplace=True)
 
-    myGcs15Fitler = (myPredictorsDf['FirstGCS'] != 15) & (myPredictorsDf.nurse_first_Motor != 6)
+    myGcs15Fitler = (myPredictorsDf.nurse_first_Motor != 6)
 
     if (aPredictedColumn == 'LastMGCSPositive'):
         myPredictorsDf = myPredictorsDf[myGcs15Fitler & myFilter & ~myPredictorsDf[aTreatmentColumn].isna()]
     else:
-        myPredictorsDf = myPredictorsDf[myGcs15Fitler & ~myPredictorsDf[aPredictedColumn].isna() & ~myPredictorsDf[aTreatmentColumn].isna()]
+        myPredictorsDf = myPredictorsDf[myFilter & myGcs15Fitler & ~myPredictorsDf[aPredictedColumn].isna() & ~myPredictorsDf[aTreatmentColumn].isna()]
 
     myColumns = []
     if (aSkipTemp):
         myColumns = [x for x in myPredictorsDf.columns if 'emp' in x]
 
     # Get output data
-    myXValue = myPredictorsDf.drop(columns= myColumns + ['FirstMGCS', 'FirstGCS', 'LastMGCSTime', 'FirstMGCSTime', 'LastMGCSPositive', 'LastMGCS' , 'apacheadmissiondx', 'hospitaladmittime24', 'FirstGCSTime', 'LastGCSTime', 'LastGCS', 'hospitaldischargestatus', 'LastGCS15', 'hospitaladmitsource', 'DeathAtDischarge', 'patientunitstayid'])
+    myXValue = myPredictorsDf.drop(columns= myColumns + ['FirstGCS', 'FirstMGCS', 'LastMGCSTime', 'FirstMGCSTime', 'LastMGCSPositive', 'LastMGCS' , 'apacheadmissiondx', 'hospitaladmittime24', 'FirstGCSTime', 'LastGCSTime', 'LastGCS', 'hospitaldischargestatus', 'LastGCS15', 'hospitaladmitsource', 'DeathAtDischarge', 'patientunitstayid'])
     myXValue = myXValue
-    myXValue.FirstGCS = myXValue.FirstGCS.astype(float)
-    myXValue.FirstMGCS = myXValue.FirstMGCS.astype(float)
+    # myXValue.FirstGCS = myXValue.FirstGCS.astype(float)
+    # myXValue.FirstMGCS = myXValue.FirstMGCS.astype(float)
     myXValue = myXValue.select_dtypes(exclude=['object'])
     myYValue = myPredictorsDf[aPredictedColumn]
     myYValue = myYValue.astype(int)
