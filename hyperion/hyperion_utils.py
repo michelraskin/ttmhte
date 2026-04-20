@@ -72,7 +72,7 @@ def getTrainTestFunctions(aPredictedColumn = 'LastMGCSPositive', aTreatmentColum
     myFilter = myPredictorsDf['groupe'] != 2
 
     # Get output data
-    myXValue = myPredictorsDf.drop(columns= myColumns + ['CPC_SC3', 'CPC12', 'J0_SEX', 'SUBJID', 'BARTHEL_SC', 'SOFA_SC7', 'DS_DC', 'DAYS_ALIVE_30', 'J0_GLASGOW_CONTROLE', 'J0_CORDA_DOS'])
+    myXValue = myPredictorsDf.drop(columns= myColumns + ['CPC_SC3', 'CPC12', 'J0_SEX', 'SUBJID', 'BARTHEL_SC', 'SOFA_SC7', 'DS_DC', 'DAYS_ALIVE_30', 'J0_GLASGOW_CONTROLE', 'J0_CORDA_DOS', 'hospital_mortality'])
     myXValue = myXValue
     myXValue = myXValue.select_dtypes(exclude=['object'])
     myYValue = myPredictorsDf[aPredictedColumn]
