@@ -27,24 +27,29 @@ temperature management after cardiac arrest. GitHub; 2026. https://github.com/mi
 ## Repository structure
 
 ```
-eICU/       eICU-CRD cohort build + analyses  (eICUUtil.py, *Analysis*.ipynb)
-mimiciv/    MIMIC-IV cohort build + analyses   (MIMICUtil.py, *Analysis*.ipynb)
-pmap/       PMAP (JH Epic Clarity) build + analyses
-hyperion/   HYPERION RCT preprocessing + analyses
-pooled/     Harmonized pooled + per-dataset sensitivity analyses (cross-fitted)
-            _build_pooled_analysis.py        -> pooledObservationalAnalysis.ipynb
-            _build_per_dataset_analysis.py   -> perDatasetSensitivity.ipynb
-deps.txt    Frozen Python environment
+eICU/               eICU-CRD cohort build + analyses  (eICUUtil.py, *Analysis*.ipynb)
+mimiciv/            MIMIC-IV cohort build + analyses   (MIMICUtil.py, *Analysis*.ipynb)
+pmap/               PMAP (JH Epic Clarity) build + analyses
+hyperion/           HYPERION RCT preprocessing + analyses
+pooled/             Builder scripts for the pooled + per-dataset sensitivity analyses
+                    _build_pooled_analysis.py        -> pooledObservationalAnalysis.ipynb
+                    _build_per_dataset_analysis.py   -> perDatasetSensitivity.ipynb
+summarized_results/ Executed sensitivity notebooks + result CSVs / figures
+deps.txt            Frozen Python environment
 ```
+
+Workflow: edit a builder in `pooled/`, regenerate the notebook, and run it from
+`summarized_results/` (where the executed notebooks and outputs live).
 
 Per dataset, `*Analysis*.ipynb` notebooks fit the S-learners (`Classif`, `Neural`, `BART`) and
 the forest R-learner (`DML`), and assess HTE by (i) a likelihood-ratio CATE×TTM interaction
 test, (ii) `CausalForestDML` CATE 95% confidence intervals, (iii) Group Average Treatment
 Effects (GATES) across CATE quintiles with inverse-probability weighting, and (iv) SHAP
-importance. The `pooled/` notebooks add the harmonized pooled analysis and the per-dataset
+importance. The sensitivity notebooks add the harmonized pooled analysis and the per-dataset
 sensitivity analyses (regularized S-learner, GATES for the neurologic outcome, uniform
-collinearity filter) using **5-fold cross-fitting** — every patient's CATE is predicted
-out-of-fold and a single interaction test is run on the full sample.
+collinearity filter). Evaluation uses a single stratified 70/30 train/test split by default
+(`EVAL_METHOD = 'split'`, consistent with the main analysis); a k-fold cross-fitting option
+(`EVAL_METHOD = 'crossfit'`) is also provided in the builders.
 
 ## Reproducibility
 
@@ -67,12 +72,12 @@ python pooled/_build_per_dataset_analysis.py
 **Run (on the analysis host with the predictor CSVs present):**
 
 ```bash
-jupyter nbconvert --to notebook --execute pooled/pooledObservationalAnalysis.ipynb \
+jupyter nbconvert --to notebook --execute summarized_results/pooledObservationalAnalysis.ipynb \
   --output pooledObservationalAnalysis.ipynb --ExecutePreprocessor.timeout=-1
 ```
 
-Results are written to `pooled/pooled_analysis_results.csv` and
-`pooled/per_dataset_results.csv`; figures are saved as PNGs alongside the notebooks.
+Results are written to `summarized_results/pooled_analysis_results.csv` and
+`summarized_results/per_dataset_results.csv`; figures are saved as PNGs alongside the notebooks.
 
 ## Data availability
 
