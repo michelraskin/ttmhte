@@ -1,34 +1,98 @@
-# ttmhte
- 
+# ttmhte — Heterogeneous Treatment Effect of Targeted Temperature Management After Cardiac Arrest
 
- ## Steps to run 
+Code accompanying the study:
 
- 1. Copy files from `S:\LCICM\Databases\cardiac_arrest_nantes\Donnees a transferer` into a folder outside of the repo, call it `replicatedfiles`, also create a new directory called `formatteddata`
- 2. Run `hyperionInitialPreprocessing.ipynb`
- 3. Run `hyperionGeneratePredictorsDf.ipynb`
+> **Heterogeneous Treatment Effect for Targeted Temperature Management After Cardiac Arrest: A Causal Machine Learning Analysis.**
+> Raskin MB, Karhu-Leperd I, Harris C, Pirracchio R, Lascarrou J-B, Stevens RD.
+> *Critical Care Medicine* (under revision; CCMED-D-26-00748).
 
- ## File descritions:
+We applied causal machine learning across one randomized trial (HYPERION) and three
+observational ICU datasets (eICU-CRD, MIMIC-IV, and the Johns Hopkins PMAP export) to test
+whether heterogeneous treatment effects (HTE) explain the inconclusive results of targeted
+temperature management (TTM) trials after cardiac arrest. Across S-learners (XGBoost, neural
+network, BART) and a forest-based R-learner (`CausalForestDML`), we found no reproducible
+evidence of HTE on hospital mortality or favorable neurologic outcome.
 
- ### hyperionInitialPreprocessing.ipynb
+## How to cite
 
- Converts from the initial data format to csvs and translates description file
+If you use this code, please cite the paper (above) and, optionally, the software via the
+`CITATION.cff` file (GitHub's "Cite this repository" button), e.g.:
 
- ### hyperionGeneratePredictorsDf.ipynb
+```
+Raskin MB, Karhu-Leperd I, Harris C, Pirracchio R, Lascarrou J-B, Stevens RD.
+ttmhte: Causal machine-learning analysis of heterogeneous treatment effects of targeted
+temperature management after cardiac arrest. GitHub; 2026. https://github.com/michelraskin/ttmhte
+```
 
- Creates the dataframe that will be shared across all analysis
+## Repository structure
 
- ### hyperionDataVisualization.ipynb
+```
+eICU/       eICU-CRD cohort build + analyses  (eICUUtil.py, *Analysis*.ipynb)
+mimiciv/    MIMIC-IV cohort build + analyses   (MIMICUtil.py, *Analysis*.ipynb)
+pmap/       PMAP (JH Epic Clarity) build + analyses
+hyperion/   HYPERION RCT preprocessing + analyses
+pooled/     Harmonized pooled + per-dataset sensitivity analyses (cross-fitted)
+            _build_pooled_analysis.py        -> pooledObservationalAnalysis.ipynb
+            _build_per_dataset_analysis.py   -> perDatasetSensitivity.ipynb
+deps.txt    Frozen Python environment
+```
 
- Data visualization of the different components of hyperion
+Per dataset, `*Analysis*.ipynb` notebooks fit the S-learners (`Classif`, `Neural`, `BART`) and
+the forest R-learner (`DML`), and assess HTE by (i) a likelihood-ratio CATE×TTM interaction
+test, (ii) `CausalForestDML` CATE 95% confidence intervals, (iii) Group Average Treatment
+Effects (GATES) across CATE quintiles with inverse-probability weighting, and (iv) SHAP
+importance. The `pooled/` notebooks add the harmonized pooled analysis and the per-dataset
+sensitivity analyses (regularized S-learner, GATES for the neurologic outcome, uniform
+collinearity filter) using **5-fold cross-fitting** — every patient's CATE is predicted
+out-of-fold and a single interaction test is run on the full sample.
 
- ### hyperionBART.ipynb
+## Reproducibility
 
- BART analysis on hyperion
+**Environment.** Python 3.11; exact package versions are pinned in [`deps.txt`](deps.txt)
+(key: scikit-learn 1.5.0, XGBoost 3.1.2, econml 0.16.0, statsmodels 0.14.4, PyTorch 2.7.1,
+TensorFlow 2.20.0 / Keras 3.12.0, pymc 5.27.0 + pymc_bart 0.11.0, SHAP 0.48.0).
 
- ### hyperionUnsupervised.ipynb
+```bash
+python -m pip install -r deps.txt   # or: pip install python-docx econml xgboost pymc-bart ...
+```
 
- Unsupervised machine learning analysis on hyperion
+**Pipeline builders.** The `pooled/` notebooks are generated from small builder scripts —
+edit the builder, then regenerate (do not hand-edit the `.ipynb`):
 
- ### scratchpad
+```bash
+python pooled/_build_pooled_analysis.py
+python pooled/_build_per_dataset_analysis.py
+```
 
- Files used to iterate on progress, not meant to be the main source of analysis
+**Run (on the analysis host with the predictor CSVs present):**
+
+```bash
+jupyter nbconvert --to notebook --execute pooled/pooledObservationalAnalysis.ipynb \
+  --output pooledObservationalAnalysis.ipynb --ExecutePreprocessor.timeout=-1
+```
+
+Results are written to `pooled/pooled_analysis_results.csv` and
+`pooled/per_dataset_results.csv`; figures are saved as PNGs alongside the notebooks.
+
+## Data availability
+
+The predictor CSVs are **not** included (data-use agreements). To reproduce:
+
+| Dataset | Access |
+|---|---|
+| eICU-CRD | PhysioNet (credentialed): https://physionet.org/content/eicu-crd/ |
+| MIMIC-IV | PhysioNet (credentialed): https://physionet.org/content/mimiciv/ |
+| PMAP (Johns Hopkins) | Institutional data-use agreement; not publicly redistributable |
+| HYPERION | From the trial investigators (NCT02057835) on reasonable request |
+
+The cohort-identification and feature-extraction notebooks document how each predictor table
+is built from the source databases.
+
+## License
+
+Code released under the MIT License (see `LICENSE`). Clinical data are governed by their
+respective data-use agreements and are not covered by this license.
+
+## Contact
+
+Corresponding author: Robert D. Stevens (rsteven1@jh.edu). Code: Michel B. Raskin.

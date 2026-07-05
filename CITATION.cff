@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite both the article and the software."
+title: "ttmhte: Causal machine-learning analysis of heterogeneous treatment effects of targeted temperature management after cardiac arrest"
+authors:
+  - family-names: Raskin
+    given-names: Michel B.
+  - family-names: Karhu-Leperd
+    given-names: Isalis
+  - family-names: Harris
+    given-names: Carl
+  - family-names: Pirracchio
+    given-names: Romain
+  - family-names: Lascarrou
+    given-names: Jean-Baptiste
+  - family-names: Stevens
+    given-names: Robert D.
+repository-code: "https://github.com/michelraskin/ttmhte"
+url: "https://github.com/michelraskin/ttmhte"
+license: MIT
+year: 2026
+preferred-citation:
+  type: article
+  title: "Heterogeneous Treatment Effect for Targeted Temperature Management After Cardiac Arrest: A Causal Machine Learning Analysis"
+  authors:
+    - family-names: Raskin
+      given-names: Michel B.
+    - family-names: Karhu-Leperd
+      given-names: Isalis
+    - family-names: Harris
+      given-names: Carl
+    - family-names: Pirracchio
+      given-names: Romain
+    - family-names: Lascarrou
+      given-names: Jean-Baptiste
+    - family-names: Stevens
+      given-names: Robert D.
+  journal: "Critical Care Medicine"
+  year: 2026
+  notes: "Under revision (CCMED-D-26-00748)."
