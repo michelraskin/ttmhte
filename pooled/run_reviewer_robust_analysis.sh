@@ -13,6 +13,15 @@ cd "$(dirname "$0")"
 MODE="${1:-full}"
 mkdir -p reviewer_robust_outputs logs
 
+export USE_TF_GPU="${USE_TF_GPU:-0}"
+export NEURAL_BACKEND="${NEURAL_BACKEND:-sklearn}"
+if [[ "$USE_TF_GPU" != "1" ]]; then
+  export CUDA_VISIBLE_DEVICES="-1"
+  export TF_CPP_MIN_LOG_LEVEL="${TF_CPP_MIN_LOG_LEVEL:-2}"
+  export TF_XLA_FLAGS="${TF_XLA_FLAGS:---tf_xla_auto_jit=0}"
+  export XLA_FLAGS="${XLA_FLAGS:-}"
+fi
+
 if [[ "$MODE" == "smoke" ]]; then
   export RUN_NEURAL_SLEARNER=0
   export RUN_BART_SLEARNER=0
