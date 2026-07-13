@@ -8,6 +8,7 @@ __pycache__/
 *.txt
 # C extensions
 *.so
+*.xlsx
 
 # Distribution / packaging
 .Python
