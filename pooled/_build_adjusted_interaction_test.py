@@ -141,6 +141,7 @@ import hte_tests as ht
 
 import re
 import time
+import traceback
 import numpy as np
 import pandas as pd
 import sklearn
@@ -183,9 +184,12 @@ CONFOUNDER_CONCEPTS = {
    'motor_gcs': (['nurse_first_Motor'], r'motor'),
    'lactate':   (['lab_first_lactate'], r'lactat'),
    'acid_base': (['lab_first_pH'], r'(^|_)ph$|_ph[_ ]|\\bph\\b'),
+   # Every rhythm pattern REQUIRES the word 'ventricular'. A looser r'fibrill' matched
+   # ATRIAL fibrillation in MIMIC-IV on the first run -- not a shockable arrest rhythm, and a
+   # clinically wrong adjustment. Do not relax these.
    'rhythm':    (['diagnosis_initial rhythm: ventricular fibrillation',
                   'diagnosis_initial rhythm: ventricular tachycardia'],
-                 r'ventricular (fibrillation|tachycardia)'),
+                 r'ventricular[_ ]?(fibrillation|tachycardia)'),
  },
  'PMAP': {
    'age':       (['age'], r'^age$'),
@@ -194,7 +198,7 @@ CONFOUNDER_CONCEPTS = {
    'lactate':   (['lab_first_lactate'], r'lactat'),
    'acid_base': (['flo_first_r_resp_ph'], r'(^|_)ph$|_ph[_ ]|resp_ph'),
    'severity':  (['flo_first_r_sofa_score'], r'sofa|apache|saps'),
-   'rhythm':    (['VF'], r'^vf$|fibrill|shockable'),
+   'rhythm':    (['VF'], r'^vf$|ventricular[_ ]?fibrill|shockable'),
  },
  'MIMIC-IV': {
    'age':       (['age'], r'^age$'),
@@ -203,7 +207,7 @@ CONFOUNDER_CONCEPTS = {
    'lactate':   (['chart_first_lactic_acid'], r'lactat|lactic'),
    'acid_base': (['chart_first_ph_(arterial)'], r'(^|_)ph$|_ph[_( ]|ph_\\(arterial\\)'),
    'rhythm':    (['long_title_ventricular_fibrillation'],
-                 r'ventricular_fibrill|fibrill|shockable'),
+                 r'ventricular[_ ]?fibrill|shockable'),
  },
  'HYPERION': {
    'age':       (['J0_AGE'], r'^j0_age$|\\bage\\b'),
@@ -273,15 +277,18 @@ def _pick(cols, exact, pattern):
     shortest name, and are capped at 2 so a loose pattern cannot drag in a whole family.\"\"\"
     hits = [c for c in exact if c in cols]
     if hits:
-        return hits, 'exact'
+        return hits, 'exact', []
     if pattern:
         rx = re.compile(pattern, re.I)
         hits = [c for c in cols if rx.search(str(c))]
         if hits:
             hits = sorted(hits, key=lambda c: (0 if 'first' in str(c).lower() else 1,
                                                len(str(c))))
-            return hits[:2], 'regex'
-    return [], 'missing'
+            # Take ONE column for a fallback match. The first run matched two PMAP lactate
+            # assays and two MIMIC rhythm columns, which both then failed downstream. The
+            # runners-up are reported so the choice is visible, not silent.
+            return hits[:1], 'regex', hits[1:]
+    return [], 'missing', []
 
 
 def resolve_confounder_columns(name, cols):
@@ -289,10 +296,15 @@ def resolve_confounder_columns(name, cols):
     Returns (list of columns, audit dict concept -> {columns, how}).\"\"\"
     picked, audit = [], {}
     for concept, (exact, pattern) in CONFOUNDER_CONCEPTS[name].items():
-        hits, how = _pick(cols, exact, pattern)
-        audit[concept] = {'columns': hits, 'how': how}
+        hits, how, alts = _pick(cols, exact, pattern)
+        audit[concept] = {'columns': hits, 'how': how, 'alternatives': alts}
         picked.extend([c for c in hits if c not in picked])
     return picked, audit
+
+
+# Filled in by load_full so the audit reflects resolution against each dataset's RAW columns,
+# not the already-subset confounder frame.
+CONFOUNDER_RESOLUTION = {}
 
 
 def load_full(name, outcome_col):
@@ -302,8 +314,17 @@ def load_full(name, outcome_col):
     # Confounders resolve against the RAW columns, independent of CURATED. They enter only the
     # second-stage regression, never the CATE model, so this cannot change the CATE.
     zcols, _audit = resolve_confounder_columns(name, list(df.columns))
+    zcols = [c for c in dict.fromkeys(zcols) if c in df.columns]   # dedupe + guard
     Zc = (df[zcols].apply(pd.to_numeric, errors='coerce') if zcols
           else pd.DataFrame(index=df.index))
+    # A column that is entirely non-numeric coerces to all-NaN; it carries no information and
+    # breaks the scaler/imputer downstream. Drop it and record why.
+    allnan = [c for c in Zc.columns if Zc[c].notna().sum() == 0]
+    if allnan:
+        Zc = Zc.drop(columns=allnan)
+        for concept, a in _audit.items():
+            a['dropped_all_nan'] = [c for c in a['columns'] if c in allnan]
+    CONFOUNDER_RESOLUTION[name] = _audit
     T = pd.to_numeric(df['TTM'], errors='coerce')
     y = pd.to_numeric(df[outcome_col], errors='coerce')
     m = (T.notna() & y.notna()).values
@@ -444,8 +465,8 @@ code("""def resolve_confounders():
     for cfg in DATASETS:
         name = cfg['name']
         Xraw, _T, _y, Zc = load_full(name, 'mortality')
-        _, audit = resolve_confounder_columns(name, list(Zc.columns))
-        # Re-resolve against the loaded frame so 'constant on cohort' can also be reported.
+        # Audit recorded by load_full against the dataset's RAW columns.
+        audit = CONFOUNDER_RESOLUTION[name]
         audits[name] = audit
         n_ok = sum(1 for a in audit.values() if a['how'] == 'exact')
         print(f"  [{name}] {n_ok}/{len(audit)} concepts matched exactly")
@@ -560,8 +581,11 @@ for cfg in DATASETS:
                   f"p_unadj={_fmt(row['p_unadj'])}, p_adj={_fmt(row['p_adj'])}, "
                   f"p_ipw={_fmt(row['p_ipw'])}", flush=True)
         except Exception as e:
+            # Print the FULL stack. The first cluster run reported only 'KeyError: <column>'
+            # with no frame, which made the failure undiagnosable from the executed notebook.
             print(f"[ADJINT] {EVAL_METHOD} | {name} | {outcome_key} ... "
                   f"FAILED: {type(e).__name__}: {e}", flush=True)
+            traceback.print_exc()
             RESULTS.append({'dataset': name, 'outcome': outcome_key,
                              'status': f'fail: {type(e).__name__}: {e}'})
         print(f"[ADJINT] DONE {EVAL_METHOD} | {name} | {outcome_key} ... "
