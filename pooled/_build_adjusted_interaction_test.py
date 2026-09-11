@@ -522,6 +522,19 @@ for cfg in DATASETS:
             y_ev, T_ev, cate = ev['y'], ev['T'], ev['cate']
             Z = ev['Z']
             Zcols = list(Z.columns)
+            # Surface confounders that never reached Z at all. `dropped_confounders` below only
+            # covers columns dropped at fit time (constant / near-constant); a concept that was
+            # never matched, or that coerced to all-NaN in load_full, would otherwise vanish
+            # from the adjustment set with no trace in the results CSV.
+            unresolved = []
+            for _concept, _a in CONFOUNDER_RESOLUTION.get(name, {}).items():
+                if _a['how'] == 'missing':
+                    unresolved.append(f'{_concept}:not-found')
+                elif _a.get('dropped_all_nan'):
+                    unresolved.append(f'{_concept}:all-nan')
+            if unresolved:
+                print(f"[ADJINT][WARN] {name}/{outcome_key}: not adjusted for {unresolved}",
+                      flush=True)
             n = int(len(y_ev)); n_events = int(np.nansum(y_ev))
 
             # Each test is isolated. A singular design in ONE test (e.g. a near-constant
@@ -570,6 +583,7 @@ for cfg in DATASETS:
                 'note_adj': r_adj['note'], 'n_confounders': r_adj['n_confounders'],
                 'confounders': r_adj['confounders'],
                 'dropped_confounders': r_adj['dropped_confounders'],
+                'confounders_unresolved': unresolved,
                 'p_ipw': r_ipw['wald_p'], 'wald_p_naive_ipw': r_ipw['wald_p_naive'],
                 'or_ipw': r_ipw['or'], 'ci_low_ipw': r_ipw['ci_low'],
                 'ci_high_ipw': r_ipw['ci_high'], 'ess_ipw': r_ipw.get('ess', np.nan),
