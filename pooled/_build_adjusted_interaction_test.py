@@ -139,6 +139,7 @@ for _c in [_here, os.path.join(_here, '..', 'pooled'), os.path.join(_here, 'pool
         sys.path.insert(0, _c); break
 import hte_tests as ht
 
+import re
 import time
 import numpy as np
 import pandas as pd
@@ -160,22 +161,58 @@ RESULTS = []      # one row per (dataset, outcome)
 # ============================================================================================ #
 # Cell 3 — prespecified confounder set
 # ============================================================================================ #
-code("""# Prespecified confounder set (Methods: age, sex, initial rhythm, initial motor GCS,
-# lactate, and an acid-base/severity marker), per dataset. Every name below is already present
-# in that dataset's CURATED list (Cell 1); Cell 7 resolves it against the actual evaluation-
-# frame columns and prints a resolution table -- which requested names were found, which are
-# missing (concept not collected for that dataset), and which are constant (not identified).
-# HYPERION has no rhythm entry on purpose: the trial enrolled only non-shockable rhythms, so
-# any rhythm indicator would be constant there -- it is omitted here rather than caught later.
-CONFOUNDERS = {
- 'eICU': ['age', 'gender', 'nurse_first_Motor', 'lab_first_lactate', 'lab_first_pH',
-          'diagnosis_initial rhythm: ventricular fibrillation',
-          'diagnosis_initial rhythm: ventricular tachycardia'],
- 'PMAP': ['age', 'gender', 'first_mGCS', 'lab_first_lactate', 'flo_first_r_resp_ph',
-          'VF', 'flo_first_r_sofa_score'],
- 'MIMIC-IV': ['age', 'gender', 'first_mGCS', 'chart_first_lactic_acid',
-              'chart_first_ph_(arterial)', 'long_title_ventricular_fibrillation'],
- 'HYPERION': ['J0_AGE', 'J0_SEX', 'J0_MOTRICE', 'BIO_LACTAT', 'BIO_PH', 'J0_IGSII'],
+code("""# Prespecified confounder set (Methods: age, sex, initial rhythm, initial motor GCS, lactate,
+# and an acid-base/illness-severity marker), expressed as CONCEPTS rather than fixed column
+# names. Each concept carries (exact candidate names, regex fallback). The resolver in Cell 7
+# tries the exact names first, then the regex against the dataset's real columns, and prints
+# exactly which column it matched for every concept. A first run with hardcoded names silently
+# lost three confounders (PMAP lactate, MIMIC-IV rhythm, HYPERION sex) because the CSV column
+# was spelled differently -- concepts + regex + a printed audit is what stops that recurring.
+#
+# IMPORTANT: confounders are resolved against the dataset's RAW columns, not the CURATED model
+# feature list. They enter only the second-stage interaction regression, never the CATE model,
+# so adding one cannot change the CATE and cannot disturb the eTable 21 reproduction. A
+# confounder the CATE model never saw is exactly what "adjust for main confounders" means.
+#
+# HYPERION has no rhythm concept on purpose: the trial enrolled only non-shockable rhythms, so
+# any rhythm indicator is constant there.
+CONFOUNDER_CONCEPTS = {
+ 'eICU': {
+   'age':       (['age'], r'^age$'),
+   'sex':       (['gender'], r'^(gender|sex)$'),
+   'motor_gcs': (['nurse_first_Motor'], r'motor'),
+   'lactate':   (['lab_first_lactate'], r'lactat'),
+   'acid_base': (['lab_first_pH'], r'(^|_)ph$|_ph[_ ]|\\bph\\b'),
+   'rhythm':    (['diagnosis_initial rhythm: ventricular fibrillation',
+                  'diagnosis_initial rhythm: ventricular tachycardia'],
+                 r'ventricular (fibrillation|tachycardia)'),
+ },
+ 'PMAP': {
+   'age':       (['age'], r'^age$'),
+   'sex':       (['gender'], r'^(gender|sex)$'),
+   'motor_gcs': (['first_mGCS'], r'first_mgcs|motor'),
+   'lactate':   (['lab_first_lactate'], r'lactat'),
+   'acid_base': (['flo_first_r_resp_ph'], r'(^|_)ph$|_ph[_ ]|resp_ph'),
+   'severity':  (['flo_first_r_sofa_score'], r'sofa|apache|saps'),
+   'rhythm':    (['VF'], r'^vf$|fibrill|shockable'),
+ },
+ 'MIMIC-IV': {
+   'age':       (['age'], r'^age$'),
+   'sex':       (['gender'], r'^(gender|sex)$'),
+   'motor_gcs': (['first_mGCS'], r'first_mgcs|motor'),
+   'lactate':   (['chart_first_lactic_acid'], r'lactat|lactic'),
+   'acid_base': (['chart_first_ph_(arterial)'], r'(^|_)ph$|_ph[_( ]|ph_\\(arterial\\)'),
+   'rhythm':    (['long_title_ventricular_fibrillation'],
+                 r'ventricular_fibrill|fibrill|shockable'),
+ },
+ 'HYPERION': {
+   'age':       (['J0_AGE'], r'^j0_age$|\\bage\\b'),
+   'sex':       (['J0_SEX', 'J0_SEXE', 'SEXE', 'sexe'], r'sex|genre|gender'),
+   'motor_gcs': (['J0_MOTRICE'], r'motrice|motor'),
+   'lactate':   (['BIO_LACTAT'], r'lactat'),
+   'acid_base': (['BIO_PH'], r'(^|_)ph$|bio_ph'),
+   'severity':  (['J0_IGSII'], r'igsii|igs2|saps'),
+ },
 }
 """)
 
@@ -230,15 +267,48 @@ def load_hyperion():
 
 LOADERS = {'eICU': load_eicu, 'PMAP': load_pmap, 'MIMIC-IV': load_mimic, 'HYPERION': load_hyperion}
 
+def _pick(cols, exact, pattern):
+    \"\"\"Resolve one confounder concept to real column name(s): exact names first, then the
+    regex fallback. Regex hits prefer a 'first'-prefixed column (baseline value) and then the
+    shortest name, and are capped at 2 so a loose pattern cannot drag in a whole family.\"\"\"
+    hits = [c for c in exact if c in cols]
+    if hits:
+        return hits, 'exact'
+    if pattern:
+        rx = re.compile(pattern, re.I)
+        hits = [c for c in cols if rx.search(str(c))]
+        if hits:
+            hits = sorted(hits, key=lambda c: (0 if 'first' in str(c).lower() else 1,
+                                               len(str(c))))
+            return hits[:2], 'regex'
+    return [], 'missing'
+
+
+def resolve_confounder_columns(name, cols):
+    \"\"\"Map CONFOUNDER_CONCEPTS[name] onto this dataset's real columns.
+    Returns (list of columns, audit dict concept -> {columns, how}).\"\"\"
+    picked, audit = [], {}
+    for concept, (exact, pattern) in CONFOUNDER_CONCEPTS[name].items():
+        hits, how = _pick(cols, exact, pattern)
+        audit[concept] = {'columns': hits, 'how': how}
+        picked.extend([c for c in hits if c not in picked])
+    return picked, audit
+
+
 def load_full(name, outcome_col):
     df = LOADERS[name]()
     cand = [c for c in CURATED[name] if c in df.columns]
     X = df[cand].apply(pd.to_numeric, errors='coerce')
+    # Confounders resolve against the RAW columns, independent of CURATED. They enter only the
+    # second-stage regression, never the CATE model, so this cannot change the CATE.
+    zcols, _audit = resolve_confounder_columns(name, list(df.columns))
+    Zc = (df[zcols].apply(pd.to_numeric, errors='coerce') if zcols
+          else pd.DataFrame(index=df.index))
     T = pd.to_numeric(df['TTM'], errors='coerce')
     y = pd.to_numeric(df[outcome_col], errors='coerce')
     m = (T.notna() & y.notna()).values
     return (X[m].reset_index(drop=True), T[m].astype(int).reset_index(drop=True),
-            y[m].astype(int).reset_index(drop=True))
+            y[m].astype(int).reset_index(drop=True), Zc[m].reset_index(drop=True))
 
 
 def preprocess(X_tr, X_te):
@@ -309,7 +379,7 @@ code("""def crossfit(name, outcome_col, observational, eval_method, cols=None):
     NOTE: cross-fitting does not increase the sample size -- n is always the number of
     independent patients.
     \"\"\"
-    X, T, y = load_full(name, outcome_col)
+    X, T, y, Zc = load_full(name, outcome_col)
     if cols is not None:
         X = X[[c for c in cols if c in X.columns]]
     strat = (y.astype(str) + '_' + T.astype(str)).values
@@ -319,21 +389,32 @@ code("""def crossfit(name, outcome_col, observational, eval_method, cols=None):
         tr, te = train_test_split(np.arange(len(y)), test_size=TEST_SIZE,
                                   random_state=SEED, stratify=strat)
         Xtr, Xte = preprocess(X.iloc[tr], X.iloc[te])
+        # Confounders get their own train-fitted scaler/imputer, kept entirely separate from X
+        # so the CATE model is byte-for-byte what it was before this adjustment set existed.
+        if Zc.shape[1]:
+            _, Zte = preprocess(Zc.iloc[tr], Zc.iloc[te])
+        else:
+            Zte = Zc.iloc[te]
         cate, lo, hi, ps, risk = _fit_eval(Xtr, Xte, T.iloc[tr], y.iloc[tr], observational)
-        return dict(X=Xte.reset_index(drop=True), T=T.iloc[te].values, y=y.iloc[te].values,
+        return dict(X=Xte.reset_index(drop=True), Z=Zte.reset_index(drop=True),
+                    T=T.iloc[te].values, y=y.iloc[te].values,
                     n_features=Xte.shape[1], cate=cate, lo=lo, hi=hi, ps=ps, risk=risk)
 
     n = len(y)
     skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=SEED)
     oof = {k: np.full(n, np.nan) for k in ['cate', 'ps', 'risk', 'lo', 'hi']}
     oof_X = pd.DataFrame(np.nan, index=range(n), columns=X.columns, dtype=float)
+    oof_Z = pd.DataFrame(np.nan, index=range(n), columns=Zc.columns, dtype=float)
     for tr, te in skf.split(X, strat):
         Xtr, Xte = preprocess(X.iloc[tr], X.iloc[te])
         oof_X.iloc[te] = Xte.values
+        if Zc.shape[1]:
+            _, Zte = preprocess(Zc.iloc[tr], Zc.iloc[te])
+            oof_Z.iloc[te] = Zte.values
         cate, lo, hi, ps, risk = _fit_eval(Xtr, Xte, T.iloc[tr], y.iloc[tr], observational)
         oof['cate'][te] = cate; oof['lo'][te] = lo; oof['hi'][te] = hi
         oof['ps'][te] = ps; oof['risk'][te] = risk
-    return dict(X=oof_X, T=T.values, y=y.values, n_features=oof_X.shape[1], **oof)
+    return dict(X=oof_X, Z=oof_Z, T=T.values, y=y.values, n_features=oof_X.shape[1], **oof)
 """)
 
 # ============================================================================================ #
@@ -345,37 +426,55 @@ evaluation rows. Each (dataset, outcome) unit is wrapped in try/except so one fa
 abort the whole cluster run.""")
 
 code("""def resolve_confounders():
-    \"\"\"Resolution table for CONFOUNDERS (Cell 3): for each dataset, which requested names
-    were found in the curated feature set, which are missing (concept unavailable for that
-    dataset), and which are constant on the full loaded cohort (and so would be dropped by
-    adjusted_lrt_cate_interaction/dr_interaction_test as unidentified). Returns
-    {dataset: [resolved column names]}. The per-evaluation-subset drop (a name can be constant
-    on a 70/30 split even if not constant on the full cohort) is reported per-fit by
-    hte_tests's own 'dropped_confounders' key, recorded in RESULTS/the manifest below.
+    \"\"\"Concept-level resolution audit for CONFOUNDER_CONCEPTS (Cell 3).
+
+    For every dataset and every concept, prints the column actually matched and HOW it was
+    matched -- 'exact' (the intended name was present), 'regex' (the intended name was absent
+    and the fallback pattern found a column: CHECK THESE, the match may be the wrong variable),
+    or 'missing' (nothing matched; that concept is genuinely not adjusted for).
+
+    Read the [RESOLVE][WARN] lines before using any adjusted p-value. A first run with
+    hardcoded names silently dropped PMAP lactate, MIMIC-IV rhythm and HYPERION sex, and the
+    adjusted column was quietly wrong for three of four cohorts.
+
+    Returns {dataset: {concept: {columns, how}}}.
     \"\"\"
-    resolved = {}
+    audits = {}
     print('=== Confounder resolution (prespecified adjustment set, Cell 3) ===')
     for cfg in DATASETS:
         name = cfg['name']
-        Xraw, _, _ = load_full(name, 'mortality')
-        requested = CONFOUNDERS[name]
-        found = [c for c in requested if c in Xraw.columns]
-        missing = [c for c in requested if c not in Xraw.columns]
-        const_here = [c for c in found if Xraw[c].dropna().nunique() <= 1]
-        kept = [c for c in found if c not in const_here]
-        resolved[name] = kept
-        print(f"  [{name}] requested={len(requested)} found={found}")
-        print(f"           missing={missing if missing else 'none'}; "
-              f"constant_on_full_cohort={const_here if const_here else 'none'}")
-    return resolved
+        Xraw, _T, _y, Zc = load_full(name, 'mortality')
+        _, audit = resolve_confounder_columns(name, list(Zc.columns))
+        # Re-resolve against the loaded frame so 'constant on cohort' can also be reported.
+        audits[name] = audit
+        n_ok = sum(1 for a in audit.values() if a['how'] == 'exact')
+        print(f"  [{name}] {n_ok}/{len(audit)} concepts matched exactly")
+        for concept, a in audit.items():
+            cols, how = a['columns'], a['how']
+            const = [c for c in cols if c in Zc.columns and Zc[c].dropna().nunique() <= 1]
+            flag = ''
+            if how == 'regex':
+                flag = '   <-- fallback match, VERIFY'
+            elif how == 'missing':
+                flag = '   <-- NOT ADJUSTED FOR'
+            if const:
+                flag += f'   <-- constant on cohort {const}, will be dropped'
+            print(f"      {concept:12s} {how:8s} {cols}{flag}")
+        for concept, a in audit.items():
+            if a['how'] != 'exact':
+                print(f"[RESOLVE][WARN] {name}/{concept}: matched by {a['how']} -> "
+                      f"{a['columns'] if a['columns'] else 'NOTHING'}")
+    return audits
 
-RESOLVED_CONFOUNDERS = resolve_confounders()
+CONFOUNDER_AUDIT = resolve_confounders()
 
 RUN_META = {
     'seed': SEED, 'eval_method': EVAL_METHOD, 'test_size': TEST_SIZE, 'ps_clip': list(PS_CLIP),
     'model': 'CausalForestDML', 'datasets': [d['name'] for d in DATASETS],
     'outcomes': ['mortality', 'neuro'],
-    'confounders': CONFOUNDERS, 'resolved_confounders': RESOLVED_CONFOUNDERS,
+    'confounder_concepts': {k: {c: list(v[0]) for c, v in spec.items()}
+                            for k, spec in CONFOUNDER_CONCEPTS.items()},
+    'confounder_resolution': CONFOUNDER_AUDIT,
     'package_versions': {
         'numpy': np.__version__, 'pandas': pd.__version__,
         'statsmodels': statsmodels.__version__, 'scikit-learn': sklearn.__version__,
@@ -400,8 +499,8 @@ for cfg in DATASETS:
         try:
             ev = crossfit(name, outcome_col, observational, EVAL_METHOD)
             y_ev, T_ev, cate = ev['y'], ev['T'], ev['cate']
-            Zcols = [c for c in RESOLVED_CONFOUNDERS[name] if c in ev['X'].columns]
-            Z = ev['X'][Zcols]
+            Z = ev['Z']
+            Zcols = list(Z.columns)
             n = int(len(y_ev)); n_events = int(np.nansum(y_ev))
 
             r_unadj = ht.lrt_cate_interaction(y_ev, T_ev, cate)
