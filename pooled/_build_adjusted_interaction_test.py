@@ -524,19 +524,40 @@ for cfg in DATASETS:
             Zcols = list(Z.columns)
             n = int(len(y_ev)); n_events = int(np.nansum(y_ev))
 
-            r_unadj = ht.lrt_cate_interaction(y_ev, T_ev, cate)
-            r_adj = ht.adjusted_lrt_cate_interaction(y_ev, T_ev, cate, Z)
+            # Each test is isolated. A singular design in ONE test (e.g. a near-constant
+            # rhythm flag making the adjusted fit non-identifiable) must not discard the other
+            # three results for that dataset/outcome, which is what happened on the first run.
+            NA_LRT = {'p': np.nan, 'lr_stat': np.nan, 'or': np.nan, 'ci_low': np.nan,
+                      'ci_high': np.nan, 'note': '', 'n_confounders': len(Zcols),
+                      'confounders': Zcols, 'dropped_confounders': []}
+            NA_W = {'wald_p': np.nan, 'wald_p_naive': np.nan, 'or': np.nan, 'ci_low': np.nan,
+                    'ci_high': np.nan, 'ess': np.nan, 'max_weight': np.nan, 'note': '',
+                    'n_confounders': len(Zcols), 'confounders': Zcols,
+                    'dropped_confounders': []}
+
+            def _safe(label, fn, fallback):
+                try:
+                    return fn()
+                except Exception as exc:
+                    print(f"[ADJINT][WARN] {name}/{outcome_key}: {label} failed "
+                          f"({type(exc).__name__}: {exc}) -- reporting NaN for this test only",
+                          flush=True)
+                    return dict(fallback, note=f'{type(exc).__name__}: {exc}')
+
+            r_unadj = _safe('unadjusted LRT',
+                            lambda: ht.lrt_cate_interaction(y_ev, T_ev, cate), NA_LRT)
+            r_adj = _safe('adjusted LRT',
+                          lambda: ht.adjusted_lrt_cate_interaction(y_ev, T_ev, cate, Z), NA_LRT)
 
             if observational:
-                r_ipw = ht.ipw_interaction_test(y_ev, T_ev, cate, ev['ps'], clip=PS_CLIP)
-                r_dr = ht.dr_interaction_test(y_ev, T_ev, cate, ev['ps'], Z, clip=PS_CLIP)
+                r_ipw = _safe('IPW', lambda: ht.ipw_interaction_test(
+                    y_ev, T_ev, cate, ev['ps'], clip=PS_CLIP), NA_W)
+                r_dr = _safe('IPW + adjusted', lambda: ht.dr_interaction_test(
+                    y_ev, T_ev, cate, ev['ps'], Z, clip=PS_CLIP), NA_W)
             else:
                 na_note = 'randomized: IPW not applicable'
-                r_ipw = {'wald_p': np.nan, 'wald_p_naive': np.nan, 'or': np.nan,
-                          'ci_low': np.nan, 'ci_high': np.nan, 'ess': np.nan,
-                          'max_weight': np.nan, 'note': na_note}
-                r_dr = dict(r_ipw, n_confounders=len(Zcols), confounders=Zcols,
-                            dropped_confounders=[])
+                r_ipw = dict(NA_W, note=na_note)
+                r_dr = dict(NA_W, note=na_note)
 
             row = {
                 'dataset': name, 'outcome': outcome_key, 'status': 'ok', 'n': n,
@@ -558,24 +579,33 @@ for cfg in DATASETS:
                 'ess_dr': r_dr.get('ess', np.nan), 'max_weight_dr': r_dr.get('max_weight', np.nan),
                 'note_dr': r_dr['note'],
             }
-            RESULTS.append(row)
-
             # Persist the evaluation-row vectors. Re-fitting the causal forest is the ONLY
             # expensive part of this notebook; every test above is a second of regression on
             # these columns. Saving them means any future variant of the interaction test
             # (a different adjustment set, different weights, a different link) can be run
             # from this CSV in seconds with no forest re-fit.
-            os.makedirs(CATE_DIR, exist_ok=True)
-            cate_out = pd.DataFrame({'y': y_ev, 'TTM': T_ev, 'cate': cate, 'ps': ev['ps']})
-            for c in Zcols:
-                cate_out[f'Z_{c}'] = ev['X'][c].values
-            cate_path = os.path.join(
-                CATE_DIR, f"cate_{name.replace('-', '').lower()}_{outcome_key}.csv")
-            cate_out.to_csv(cate_path, index=False)
-            row['cate_file'] = cate_path
-            print(f"[ADJINT] saved evaluation vectors -> {cate_path} "
-                  f"({len(cate_out)} rows)", flush=True)
+            #
+            # Confounders come from Z, NOT ev['X']: since confounders resolve against the raw
+            # columns they need not appear in the CURATED feature list, and indexing ev['X']
+            # with one that does not raised KeyError AFTER the result row had been appended --
+            # which is what produced duplicated ok/fail rows on the previous run. Saving is
+            # also non-fatal now, and the row is appended only once, after it.
+            try:
+                os.makedirs(CATE_DIR, exist_ok=True)
+                cate_out = pd.DataFrame({'y': y_ev, 'TTM': T_ev, 'cate': cate, 'ps': ev['ps']})
+                for c in Zcols:
+                    cate_out[f'Z_{c}'] = Z[c].values
+                cate_path = os.path.join(
+                    CATE_DIR, f"cate_{name.replace('-', '').lower()}_{outcome_key}.csv")
+                cate_out.to_csv(cate_path, index=False)
+                row['cate_file'] = cate_path
+                print(f"[ADJINT] saved evaluation vectors -> {cate_path} "
+                      f"({len(cate_out)} rows)", flush=True)
+            except Exception as exc:
+                print(f"[ADJINT][WARN] {name}/{outcome_key}: could not save evaluation vectors "
+                      f"({type(exc).__name__}: {exc}); results are unaffected", flush=True)
 
+            RESULTS.append(row)
             ht.append_manifest(MANIFEST_PATH, {**row, 'elapsed_s': time.time() - t0})
             print(f"[ADJINT] {EVAL_METHOD} | {name} | {outcome_key} ... "
                   f"p_unadj={_fmt(row['p_unadj'])}, p_adj={_fmt(row['p_adj'])}, "

@@ -37,9 +37,28 @@ def _or_ci(coef, se):
     return float(np.exp(coef)), float(np.exp(coef - 1.96 * se)), float(np.exp(coef + 1.96 * se))
 
 
-def _drop_constant_cols(Z):
+MIN_LEVEL_N = 5
+
+
+def _drop_constant_cols(Z, min_level_n=MIN_LEVEL_N):
+    """Drop confounders that cannot identify a coefficient.
+
+    Constant columns are dropped outright. Binary columns with fewer than `min_level_n`
+    observations in their rarer level are dropped too: a rhythm flag with 2 positives in a
+    168-row evaluation set makes the adjusted design effectively singular, which surfaced as
+    `LinAlgError: Singular matrix` and cost the whole dataset/outcome its results.
+    """
     Z = pd.DataFrame(Z).reset_index(drop=True)
-    dropped = [c for c in Z.columns if np.ptp(Z[c].astype(float).values) < 1e-12]
+    dropped = []
+    for c in Z.columns:
+        v = pd.to_numeric(Z[c], errors='coerce')
+        vals = v.dropna().values
+        if len(vals) == 0 or np.ptp(vals) < 1e-12:
+            dropped.append(c)
+            continue
+        levels = np.unique(vals)
+        if len(levels) == 2 and min((vals == lv).sum() for lv in levels) < min_level_n:
+            dropped.append(c)
     return Z.drop(columns=dropped), dropped
 
 
